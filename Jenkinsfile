@@ -23,6 +23,8 @@ pipeline {
     DOCKER_USERNAME = credentials('DOCKER_USERNAME')
     DOCKER_PASSWORD = credentials('DOCKER_PASSWORD')
     NEW_RELIC_LICENSE_KEY = credentials('NEW_RELIC_LICENSE_KEY')
+    DATABASE_URL = credentials('DATABASE_URL')
+    RS_ROOT = credentials('RS_ROOT')
   }
 
   parameters {
@@ -68,12 +70,14 @@ pipeline {
             cp .env.example .env
 
             sed -i "/^APP_ENV=/c APP_ENV=production" .env
+            sed -i "/^DATABASE_URL=/c DATABASE_URL=${DATABASE_URL}" .env
             sed -i "/^ROOT_API=/c ROOT_API=https://lapeche.date/api" .env
             sed -i "/^MAIL_FROM=/c MAIL_FROM=${MAIL_FROM}" .env
             sed -i "/^MAIL_USERNAME=/c MAIL_USERNAME=${MAIL_USERNAME}" .env
             sed -i "/^MAIL_PASSWORD=/c MAIL_PASSWORD=${MAIL_PASSWORD}" .env
             sed -i "/^MAIL_HOST=/c MAIL_HOST=${MAIL_HOST}" .env
             sed -i "/^JWT_SECRET=/c JWT_SECRET=${JWT_SECRET}" .env
+            sed -i "/^RS_ROOT=/c RS_ROOT=${RS_ROOT}" .env
             sed -i "/^APPLICATION_ROOT=/c APPLICATION_ROOT=https://lapeche.date" .env
 
             docker login ${DOCKER_REGISTRY} --username ${DOCKER_USERNAME} --password ${DOCKER_PASSWORD}

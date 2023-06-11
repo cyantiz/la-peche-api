@@ -8,17 +8,36 @@ import {
   sensitiveFields,
 } from 'src/helpers/helpers';
 import { MailService } from 'src/mail/mail.service';
-import { PageDto, PaginationHandle } from 'src/prisma/helper/prisma.helper';
+import {
+  OrderByHandle,
+  PageDto,
+  PaginationHandle,
+} from 'src/prisma/helper/prisma.helper';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { CreateImageDto, UpdateImageDto, UpdateUserDto } from './dto/user.dto';
-import { ImageModel, UserModel } from './model/user.model';
+import {
+  ChangeImageOrderDto,
+  CreateImageDto,
+  GetRecommendedUsersDto,
+  UpdateImageDto,
+  UpdateIntoShownFieldsDto,
+  UpdateUserDto,
+} from './dto/user.dto';
+import { ImageModel, UserDetailInfo, UserModel } from './model/user.model';
+import { instanceToPlain } from 'class-transformer';
+import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 
 @Injectable()
 export class UserService {
+  private readonly recommendationSystemRoot: string;
+
   constructor(
     private prismaService: PrismaService,
     private mailService: MailService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.recommendationSystemRoot = this.configService.get('RS_ROOT');
+  }
 
   private async checkVerifiedUser(username: string): Promise<boolean> {
     const user = await this.prismaService.user.findFirst({
@@ -197,17 +216,20 @@ export class UserService {
       });
   }
 
-  async getAllUsers(query: PageDto): Promise<UserModel[]> {
+  async getAllUsers(query: PageDto): Promise<UserDetailInfo[]> {
     const dbQuery = {
       where: {
         isDeleted: false,
+      },
+      include: {
+        userImages: true,
       },
     };
 
     PaginationHandle(dbQuery, query.page, query.pageSize);
     const users = await this.prismaService.user.findMany(dbQuery);
 
-    return PlainToInstance(UserModel, users);
+    return PlainToInstance(UserDetailInfo, users);
   }
 
   async getUserByUsername(
@@ -264,6 +286,10 @@ export class UserService {
       username: string;
     },
   ): Promise<UserModel> {
+    const initRSRegister = dto.init;
+
+    delete dto.init;
+
     const condition = {
       isDeleted: false,
     };
@@ -275,12 +301,50 @@ export class UserService {
       condition['username'] = username;
     else throw new BadRequestException(ErrorMessages.USER.USER_INVALID);
 
-    const updatedUser = await this.prismaService.user.updateMany({
+    if (dto.location) dto['provinceCode'] = dto.location.split(',')[0];
+
+    await this.prismaService.user.updateMany({
       where: condition,
       data: dto,
     });
 
-    return PlainToInstance(UserModel, updatedUser[0]);
+    const updatedUser = await this.prismaService.user.findFirst({
+      where: condition,
+    });
+
+    if (initRSRegister) {
+      const registerToRSData = {
+        status: dto.status,
+        body_type: dto.bodyType,
+        diet: dto.diet,
+        drinks: dto.drinks,
+        drugs: dto.drugs,
+        education: dto.education,
+        ethnicity: dto.ethnicity,
+        job: dto.job,
+        offspring: dto.offspring,
+        pets: dto.pets,
+        religion: null,
+        sign: dto.sign,
+        smokes: dto.smokes,
+        speaks: dto.speaks,
+        age: new Date().getFullYear() - dto.yearOfBirth,
+        biographic: dto.biographic,
+      };
+
+      axios.post(
+        `${this.recommendationSystemRoot}/register`,
+        JSON.stringify(registerToRSData),
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+        },
+      );
+    }
+
+    return PlainToInstance(UserModel, updatedUser);
   }
 
   async deleteUser(
@@ -316,6 +380,19 @@ export class UserService {
       throw new BadRequestException(
         'Username not match or user is already deleted',
       );
+  }
+
+  async banUser(username: string): Promise<string> {
+    await this.prismaService.user.update({
+      where: {
+        username: username,
+      },
+      data: {
+        isActivated: false,
+      },
+    });
+
+    return Messages.USER.USER_BANNED;
   }
 
   async likeUser(
@@ -390,6 +467,28 @@ export class UserService {
             },
             where: {
               username: user.username,
+            },
+          });
+
+          await this.prismaService.notification.create({
+            data: {
+              text: `You have matched with ${targetUser.username}`,
+              user: {
+                connect: {
+                  username: user.username,
+                },
+              },
+            },
+          });
+
+          await this.prismaService.notification.create({
+            data: {
+              text: `You have matched with ${user.username}`,
+              user: {
+                connect: {
+                  username: targetUser.username,
+                },
+              },
             },
           });
 
@@ -759,6 +858,7 @@ export class UserService {
         userId: user.userId,
         isThumbnail: dto.isThumbnail,
         url: dto.url,
+        order: dto.order,
       },
     });
 
@@ -786,6 +886,20 @@ export class UserService {
     const userImage = await this.prismaService.user_image.delete({
       where: {
         id: id,
+      },
+    });
+
+    await this.prismaService.user_image.updateMany({
+      where: {
+        userId: user.userId,
+        order: {
+          gt: image.order,
+        },
+      },
+      data: {
+        order: {
+          decrement: 1,
+        },
       },
     });
 
@@ -853,7 +967,7 @@ export class UserService {
   async getLikedUsers(
     query: PageDto,
     options: { username: string },
-  ): Promise<UserModel[]> {
+  ): Promise<UserDetailInfo[]> {
     const dbQuery = {
       where: {
         username: options.username,
@@ -870,25 +984,43 @@ export class UserService {
     PaginationHandle(dbQuery.select.liking, query.page, query.pageSize);
     const user = await this.prismaService.user.findFirst(dbQuery);
 
-    const likedUsers: UserModel[] = [];
+    const likedUsers: UserDetailInfo[] = [];
 
     await Promise.all(
       user.liking.map(async (likedUser) => {
-        const user = await this.getUserByUsername(likedUser.username, {
-          role: Role.USER,
-          username: options.username,
-        });
-        likedUsers.push(PlainToInstance(UserModel, user));
+        const user = await this.getUserInfoWithImagesByUsername(
+          likedUser.username,
+          {
+            role: Role.USER,
+            username: options.username,
+          },
+        );
+        likedUsers.push(user);
       }),
     );
 
     return likedUsers;
   }
 
+  async getLikedUsersCount(options: { username: string }): Promise<number> {
+    const count = (
+      await this.prismaService.user.findFirst({
+        where: {
+          username: options.username,
+        },
+        select: {
+          liking: true,
+        },
+      })
+    ).liking.length;
+
+    return count;
+  }
+
   async getStarredUsers(
     query: PageDto,
     options: { username: string },
-  ): Promise<UserModel[]> {
+  ): Promise<UserDetailInfo[]> {
     const dbQuery = {
       where: {
         username: options.username,
@@ -903,27 +1035,47 @@ export class UserService {
     };
 
     PaginationHandle(dbQuery.select.staring, query.page, query.pageSize);
+    OrderByHandle(dbQuery, [{ createdAt: 'desc' }]);
+
     const user = await this.prismaService.user.findFirst(dbQuery);
 
-    const starredUsers: UserModel[] = [];
+    const starredUsers: UserDetailInfo[] = [];
 
     await Promise.all(
       user.staring.map(async (starredUser) => {
-        const user = await this.getUserByUsername(starredUser.username, {
-          role: Role.USER,
-          username: options.username,
-        });
-        starredUsers.push(PlainToInstance(UserModel, user));
+        const user = await this.getUserInfoWithImagesByUsername(
+          starredUser.username,
+          {
+            role: Role.USER,
+            username: options.username,
+          },
+        );
+        starredUsers.push(user);
       }),
     );
 
     return starredUsers;
   }
 
+  async getStarredUsersCount(options: { username: string }): Promise<number> {
+    const count = (
+      await this.prismaService.user.findFirst({
+        where: {
+          username: options.username,
+        },
+        select: {
+          staring: true,
+        },
+      })
+    ).staring.length;
+
+    return count;
+  }
+
   async getSkippedUsers(
     query: PageDto,
     options: { username: string },
-  ): Promise<UserModel[]> {
+  ): Promise<UserDetailInfo[]> {
     const dbQuery = {
       where: {
         username: options.username,
@@ -940,66 +1092,279 @@ export class UserService {
     PaginationHandle(dbQuery.select.skipping, query.page, query.pageSize);
     const user = await this.prismaService.user.findFirst(dbQuery);
 
-    const skippedUsers: UserModel[] = [];
+    const skippedUsers: UserDetailInfo[] = [];
 
     await Promise.all(
       user.skipping.map(async (skippedUser) => {
-        const user = await this.getUserByUsername(skippedUser.username, {
-          role: Role.USER,
-          username: options.username,
-        });
-        skippedUsers.push(PlainToInstance(UserModel, user));
+        const user = await this.getUserInfoWithImagesByUsername(
+          skippedUser.username,
+          {
+            role: Role.USER,
+            username: options.username,
+          },
+        );
+        skippedUsers.push(PlainToInstance(UserDetailInfo, user));
       }),
     );
 
     return skippedUsers;
   }
 
+  async getSkippedUsersCount(options: { username: string }): Promise<number> {
+    const count = (
+      await this.prismaService.user.findFirst({
+        where: {
+          username: options.username,
+        },
+        select: {
+          skipping: true,
+        },
+      })
+    ).skipping.length;
+
+    return count;
+  }
+
   async getRecommendedUsers(
-    query: PageDto,
+    query: GetRecommendedUsersDto,
     options: {
       username: string;
     },
-  ): Promise<UserModel[]> {
-    const dbQuery = {
+  ): Promise<UserDetailInfo[]> {
+    const user = await this.prismaService.user.findFirst({
       where: {
         username: options.username,
       },
       select: {
+        id: true,
+        location: true,
+        gender: true,
+        provinceCode: true,
         recommendedUsers: {
           select: {
             username: true,
           },
         },
+        skipping: {
+          select: {
+            username: true,
+          },
+        },
+        liking: {
+          select: {
+            username: true,
+          },
+        },
+        staring: {
+          select: {
+            username: true,
+          },
+        },
       },
-    };
+    });
 
-    PaginationHandle(
-      dbQuery.select.recommendedUsers,
-      query.page,
-      query.pageSize,
+    const skippedUsernames = user.skipping.map((user) => user.username);
+    const likedUsernames = user.liking.map((user) => user.username);
+    const starredUsernames = user.staring.map((user) => user.username);
+
+    const extraCondition = {};
+
+    if (user.provinceCode && user.location)
+      extraCondition['provinceCode'] = {
+        in: user.provinceCode,
+      };
+
+    const potentialUsers = await this.prismaService.user.findMany({
+      where: {
+        ...extraCondition,
+        gender: {
+          not: user.gender,
+        },
+        username: {
+          notIn: skippedUsernames.concat(likedUsernames, starredUsernames),
+        },
+        isActivated: true,
+        isDeleted: false,
+      },
+    });
+
+    const potentialUserIds = potentialUsers.map((user) => user.id);
+
+    const response = await axios.post(
+      `${this.recommendationSystemRoot}/match?user_id=${user.id}`,
+      potentialUserIds,
     );
-    const user = await this.prismaService.user.findFirst(dbQuery);
 
-    const recommendedUsers: UserModel[] = [];
+    const recommendationData: number[] = JSON.parse(
+      JSON.stringify(response.data),
+    )['rank_list'];
+
+    const recommendedUserIds = recommendationData.slice(0, query.quantity);
+
+    const recommendedUsers = await this.prismaService.user.findMany({
+      where: {
+        id: {
+          in: recommendedUserIds,
+        },
+      },
+      select: {
+        username: true,
+        id: true,
+      },
+    });
+
+    const recommendedResults: UserDetailInfo[] = [];
 
     await Promise.all(
-      user.recommendedUsers.map(async (recommendedUser) => {
-        const user = await this.getUserByUsername(recommendedUser.username, {
-          role: Role.USER,
-          username: options.username,
+      recommendedUsers.map(async (recommendedUser) => {
+        const result = await this.getUserInfoWithImagesByUsername(
+          recommendedUser.username,
+          {
+            role: Role.USER,
+            username: options.username,
+          },
+        );
+
+        await this.prismaService.user.update({
+          where: {
+            id: user.id,
+          },
+          data: {
+            recommendedUsers: {
+              connect: {
+                id: recommendedUser.id,
+              },
+            },
+          },
         });
-        recommendedUsers.push(PlainToInstance(UserModel, user));
+
+        recommendedResults.push(result);
       }),
     );
 
-    return recommendedUsers;
+    return recommendedResults;
+  }
+
+  async getNextRecommendedUser(options: {
+    username: string;
+  }): Promise<UserDetailInfo> {
+    const user = await this.prismaService.user.findFirst({
+      where: {
+        username: options.username,
+      },
+      select: {
+        id: true,
+        location: true,
+        gender: true,
+        provinceCode: true,
+        recommendedUsers: {
+          select: {
+            username: true,
+          },
+        },
+        skipping: {
+          select: {
+            username: true,
+          },
+        },
+        liking: {
+          select: {
+            username: true,
+          },
+        },
+        staring: {
+          select: {
+            username: true,
+          },
+        },
+      },
+    });
+
+    const skippedUsernames = user.skipping.map((user) => user.username);
+    const likedUsernames = user.liking.map((user) => user.username);
+    const starredUsernames = user.staring.map((user) => user.username);
+    const recommendedUsernames = user.recommendedUsers.map(
+      (user) => user.username,
+    );
+
+    const extraCondition = {};
+
+    if (user.provinceCode && user.location)
+      extraCondition['provinceCode'] = {
+        in: user.provinceCode,
+      };
+
+    const potentialUsers = await this.prismaService.user.findMany({
+      where: {
+        ...extraCondition,
+        gender: {
+          not: user.gender,
+        },
+        username: {
+          notIn: skippedUsernames.concat(
+            likedUsernames,
+            starredUsernames,
+            recommendedUsernames,
+          ),
+        },
+        isActivated: true,
+        isDeleted: false,
+      },
+    });
+
+    const potentialUserIds = potentialUsers.map((user) => user.id);
+
+    const response = await axios.post(
+      `${this.recommendationSystemRoot}/match?user_id=${user.id}`,
+      potentialUserIds,
+    );
+
+    const recommendationData: number[] = JSON.parse(
+      JSON.stringify(response.data),
+    )['rank_list'];
+
+    const recommendedUserIds = recommendationData.slice(0, 1);
+
+    const recommendedUser = await this.prismaService.user.findFirst({
+      where: {
+        id: {
+          in: recommendedUserIds,
+        },
+      },
+      select: {
+        username: true,
+        id: true,
+      },
+    });
+
+    const result = await this.getUserInfoWithImagesByUsername(
+      recommendedUser.username,
+      {
+        role: Role.USER,
+        username: options.username,
+      },
+    );
+
+    await this.prismaService.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        recommendedUsers: {
+          connect: {
+            id: recommendedUser.id,
+          },
+        },
+      },
+    });
+
+    return PlainToInstance(UserDetailInfo, result);
   }
 
   async getMatchedUsers(
     query: PageDto,
     options: { username: string },
-  ): Promise<UserModel[]> {
+  ): Promise<UserDetailInfo[]> {
     const dbQuery = {
       where: {
         username: options.username,
@@ -1014,20 +1379,233 @@ export class UserService {
     };
 
     PaginationHandle(dbQuery.select.matching, query.page, query.pageSize);
+    OrderByHandle(dbQuery, [{ createdAt: 'desc' }]);
     const user = await this.prismaService.user.findFirst(dbQuery);
 
-    const matchedUsers: UserModel[] = [];
+    const matchedUsers: UserDetailInfo[] = [];
 
     await Promise.all(
       user.matching.map(async (matchedUser) => {
-        const user = await this.getUserByUsername(matchedUser.username, {
-          role: Role.USER,
-          username: options.username,
-        });
-        matchedUsers.push(PlainToInstance(UserModel, user));
+        const user = await this.getUserInfoWithImagesByUsername(
+          matchedUser.username,
+          {
+            role: Role.USER,
+            username: options.username,
+          },
+        );
+        matchedUsers.push(user);
       }),
     );
 
     return matchedUsers;
+  }
+
+  async getMatchedUsersCount(options: { username: string }): Promise<number> {
+    const count = (
+      await this.prismaService.user.findFirst({
+        where: {
+          username: options.username,
+        },
+        select: {
+          matched: true,
+        },
+      })
+    ).matched.length;
+
+    return count;
+  }
+
+  async getUserInfoWithImagesByUsername(
+    username: string,
+    user: {
+      role: string;
+      username: string;
+    },
+  ): Promise<UserDetailInfo> {
+    let result: UserDetailInfo;
+    if (
+      (user.role === Role.USER && username === user.username) ||
+      user.role === Role.ADMIN
+    ) {
+      const user = await this.prismaService.user.findFirst({
+        where: {
+          username: username,
+          isDeleted: false,
+        },
+        include: {
+          userImages: true,
+        },
+      });
+
+      result = PlainToInstance(UserDetailInfo, user);
+    } else {
+      const user = await this.prismaService.user.findFirst({
+        where: {
+          username: username,
+          isDeleted: false,
+        },
+        include: {
+          userImages: true,
+        },
+      });
+
+      if (user) {
+        for (const [key, value] of Object.entries(user.introShownFields)) {
+          if (!value) delete user[key];
+        }
+
+        sensitiveFields.map((field) => {
+          delete user[field];
+        });
+      }
+
+      result = PlainToInstance(UserDetailInfo, user);
+    }
+
+    if (!result) throw new BadRequestException(ErrorMessages.USER.USER_INVALID);
+
+    return result;
+  }
+
+  async updateIntroShownFields(
+    dto: UpdateIntoShownFieldsDto,
+    user: {
+      role: string;
+      username: string;
+    },
+  ): Promise<void> {
+    await this.prismaService.user.update({
+      where: {
+        username: user.username,
+      },
+      data: {
+        introShownFields: instanceToPlain(dto),
+      },
+    });
+  }
+
+  async changeImageOrder(
+    id: number,
+    dto: ChangeImageOrderDto,
+    user: {
+      role: string;
+      username: string;
+      userId: number;
+    },
+  ): Promise<ImageModel> {
+    const image = await this.prismaService.user_image.findFirst({
+      where: {
+        userId: user.userId,
+        id: id,
+      },
+    });
+
+    if (!image)
+      throw new BadRequestException(ErrorMessages.USER.USER_IMAGE_NOT_EXIST);
+
+    const largestOrderImage = await this.prismaService.user_image.findFirst({
+      where: {
+        userId: user.userId,
+      },
+      select: {
+        order: true,
+        id: true,
+      },
+      orderBy: {
+        order: 'desc',
+      },
+    });
+
+    const smallestOrderImage = await this.prismaService.user_image.findFirst({
+      where: {
+        userId: user.userId,
+      },
+      select: {
+        order: true,
+        id: true,
+      },
+      orderBy: {
+        order: 'asc',
+      },
+    });
+
+    const oldOrder = image.order;
+    const largestOrder = largestOrderImage.order;
+    const smallestOrder = smallestOrderImage.order;
+
+    if (dto.order >= largestOrder) {
+      dto.order = largestOrder;
+
+      await this.prismaService.user_image.updateMany({
+        where: {
+          order: {
+            gt: oldOrder,
+          },
+          userId: user.userId,
+        },
+        data: {
+          order: {
+            decrement: 1,
+          },
+        },
+      });
+    } else if (dto.order <= smallestOrder) {
+      dto.order = smallestOrder;
+
+      await this.prismaService.user_image.updateMany({
+        where: {
+          order: {
+            lt: oldOrder,
+          },
+          userId: user.userId,
+        },
+        data: {
+          order: {
+            increment: 1,
+          },
+        },
+      });
+    } else if (oldOrder < dto.order) {
+      await this.prismaService.user_image.updateMany({
+        where: {
+          order: {
+            gt: oldOrder,
+            lte: dto.order,
+          },
+          userId: user.userId,
+        },
+        data: {
+          order: {
+            decrement: 1,
+          },
+        },
+      });
+    } else if (oldOrder > dto.order) {
+      await this.prismaService.user_image.updateMany({
+        where: {
+          order: {
+            gte: dto.order,
+            lt: oldOrder,
+          },
+          userId: user.userId,
+        },
+        data: {
+          order: {
+            increment: 1,
+          },
+        },
+      });
+    } else if (oldOrder == dto.order) return;
+
+    await this.prismaService.user_image.update({
+      where: {
+        id: id,
+      },
+      data: {
+        order: dto.order,
+      },
+    });
+
+    return PlainToInstance(ImageModel, image);
   }
 }

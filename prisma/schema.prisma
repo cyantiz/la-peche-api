@@ -29,26 +29,27 @@ model user {
   gender      String
   status      String
   orientation String
-  biographic  String?
+  biographic  String? @db.Text
 
-  email       String  @unique
-  yearOfBirth Int?
-  bodyType    String?
-  diet        String?
-  drinks      String?
-  drugs       String?
-  education   String?
-  ethnicity   String?
-  height      Float?
-  income      Float?
-  job         String?
-  location    String?
-  offspring   String?
-  pets        String?
-  sign        String?
-  smokes      String?
-  speaks      String?
-  phoneNumber String?
+  email        String  @unique
+  yearOfBirth  Int?
+  bodyType     String?
+  diet         String?
+  drinks       String?
+  drugs        String?
+  education    String?
+  ethnicity    String?
+  height       Float?
+  income       Float?
+  job          String?
+  location     String?
+  provinceCode String?
+  offspring    String?
+  pets         String?
+  sign         String?
+  smokes       String?
+  speaks       String?
+  phoneNumber  String?
 
   notifications    notification[]
   coupons          coupon[]
@@ -103,6 +104,7 @@ model user_image {
   id          Int     @id @default(autoincrement())
   url         String
   isThumbnail Boolean
+  order       Int?
 
   createdAt DateTime @default(now()) @db.DateTime(0)
   updatedAt DateTime @default(now()) @updatedAt @db.DateTime(0)

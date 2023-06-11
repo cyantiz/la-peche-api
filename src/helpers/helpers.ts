@@ -1,24 +1,24 @@
 import { plainToInstance } from 'class-transformer';
 
 export const introShownFields = {
-  yearOfBirth: false,
-  bodyType: false,
-  diet: false,
-  drinks: false,
-  drugs: false,
-  education: false,
-  ethnicity: false,
-  height: false,
-  income: false,
-  job: false,
-  location: false,
-  offspring: false,
-  pets: false,
-  sign: false,
-  smokes: false,
-  speaks: false,
-  email: false,
-  phoneNumber: false,
+  yearOfBirth: true,
+  bodyType: true,
+  diet: true,
+  drinks: true,
+  drugs: true,
+  education: true,
+  ethnicity: true,
+  height: true,
+  income: true,
+  job: true,
+  location: true,
+  offspring: true,
+  pets: true,
+  sign: true,
+  smokes: true,
+  speaks: true,
+  email: true,
+  phoneNumber: true,
 };
 
 export const sensitiveFields = [
@@ -78,6 +78,7 @@ export const Messages = {
     USER_UNSTARRED: 'This user has been unstarred',
     USER_SKIPPED: 'This user has been skipped',
     USER_UNSKIPPED: 'This user has been unskipped',
+    USER_BANNED: 'This user has been banned',
   },
 };
 

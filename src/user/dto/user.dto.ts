@@ -1,8 +1,20 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Expose } from 'class-transformer';
-import { IsOptional, IsString, IsUrl, Matches } from 'class-validator';
+import { Expose, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  Min,
+} from 'class-validator';
 
 export class UpdateUserDto {
+  @IsOptional()
+  @ApiProperty({ type: Boolean, default: false })
+  init: boolean;
+
   @IsOptional()
   @Expose()
   @ApiProperty({ type: String })
@@ -118,9 +130,14 @@ export class CreateImageDto {
   url: string;
 
   @Expose()
-  @IsString()
+  @IsBoolean()
   @ApiProperty({ type: Boolean, required: true, nullable: false })
   isThumbnail: boolean;
+
+  @Expose()
+  @IsNumber()
+  @ApiProperty({ type: Number, required: true, nullable: false })
+  order: number;
 }
 
 export class UpdateImageDto {
@@ -145,3 +162,111 @@ export class LikeUserDto {
 export class StarUserDto extends LikeUserDto {}
 
 export class SkipUserDto extends LikeUserDto {}
+
+export class BanUserDto extends LikeUserDto {}
+
+export class UpdateIntoShownFieldsDto {
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  yearOfBirth?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  bodyType: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  diet: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  drinks: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  drugs: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  education: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  ethnicity: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  height: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  income: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  job: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  location: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  offspring: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  pets: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  sign: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  smokes: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  speaks: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  email: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ type: Boolean, required: false })
+  phoneNumber: boolean;
+}
+
+export class ChangeImageOrderDto {
+  @IsNumber()
+  @ApiProperty({ type: Number, required: true })
+  @Min(1)
+  order: number;
+}
+
+export class GetRecommendedUsersDto {
+  @Type(() => Number)
+  @ApiProperty({ type: Number, required: true })
+  @Min(1)
+  quantity: number;
+}
